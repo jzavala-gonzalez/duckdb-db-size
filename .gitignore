@@ -2,6 +2,7 @@ env/*
 regions_without_service/*
 databases/*
 initial_regions_without_service/*
+incremental_regions_without_service/*
 
 .DS_Store
 __MACOSX/*

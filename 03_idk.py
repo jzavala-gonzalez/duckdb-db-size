@@ -6,7 +6,7 @@ from constants import data_dir
 
 num_starting_files_options = [1, ] # how many files ingested at creation time
                                    # must be at least 1
-batch_size = 3000 # how many files to ingest at a time, usually 1 or 2
+batch_size = 2000 # how many files to ingest at a time, usually 1 or 2
 
 # Get file info
 con_files = duckdb.connect('databases/files.db')
@@ -16,6 +16,7 @@ filepaths = con_files.sql('SELECT filepath FROM file_sizes').fetchall()
 filepaths = [row[0] for row in filepaths]
 num_files = len(filepaths)
 print(f'{num_files:,} files in dataset')
+print()
 
 
 con_files.close()
@@ -78,10 +79,11 @@ for num_starting_files in num_starting_files_options:
 
     con = duckdb.connect(tmp_db_path)
     print('Initial database size:')
+    print(f'Total rows: {con.sql("select count(*) from regions_without_service_staging").fetchone()[0]:,}')
     print(con.sql('call pragma_database_size();'))
     con.close()
 
-    ### Create incremental datasets
+    ### Batch incremental datasets
     incremental_files = filepaths[num_starting_files:]
     num_incremental_files = len(incremental_files)
     batch_indexes = [
@@ -92,7 +94,79 @@ for num_starting_files in num_starting_files_options:
     num_batches = len(batch_indexes)
     # print(batch_indexes)
     print(f'{num_batches:,} batches of {batch_size:,} files each')
+
+    for batch_num, (start, end) in enumerate(batch_indexes, start=1):
+        print(f'Batch {batch_num}/{num_batches}')
+        print(f'Files {start:,}-{end:,}')
+
+        if os.path.exists(incremental_data_dir):
+            shutil.rmtree(incremental_data_dir)
+        filepaths_incremental = incremental_files[start:end]
+        for fpath in filepaths_incremental:
+            new_filepath = 'incremental_' + fpath
+            os.makedirs(os.path.dirname(new_filepath), exist_ok=True)
+            shutil.copy(fpath, new_filepath)
+
+        # Ingest batch
+        con = duckdb.connect(tmp_db_path)
+        con.execute(
+        f'''
+        create or replace TEMP table local_raw_regions_without_service as (
+            select *
+            from read_json('{incremental_data_dir}/*/*.json', filename=true, auto_detect=true, format='auto') 
+        )
+        ''')
+        con.execute(
+        '''
+        create or replace TEMP table local_regions_without_service_staging as (
+            select
+                strptime("timestamp", '%m/%d/%Y %I:%M %p') as "marca_hora_presentada",
+                filename
+                    .string_split('__')[2]
+                    .regexp_extract('(.*).json', 1)
+                    .strptime('%Y-%m-%dT%H-%M-%S%z')
+                    ::TIMESTAMP -- drop timezone
+                    as "marca_hora_accedida",
+                regions,
+                totals,
+                filename as object_key,
+            from local_raw_regions_without_service
+        );
+        ''')
+        con.execute('''
+        create or replace table regions_without_service_staging as (
+        with initial_union as (
+            select *
+            from regions_without_service_staging
+            union all
+            select *
+            from local_regions_without_service_staging
+        ),
+
+        regions_with_dupe_counts as (
+            select
+                *,
+                row_number() over (partition by object_key) as object_key_copy_number
+            from initial_union
+        )
+
+        select * exclude (object_key_copy_number)
+        from regions_with_dupe_counts
+        where object_key_copy_number = 1
+        order by object_key
+        );
+        ''')
+        con.close()
+
+        # Measure new database size
+        con = duckdb.connect(tmp_db_path)
+        print(f'Total rows: {con.sql("select count(*) from regions_without_service_staging").fetchone()[0]:,}')
+        print(con.sql('call pragma_database_size();'))
+        con.close()
+
+        print()
     
     # con.close()
 
+shutil.rmtree(incremental_data_dir)
 shutil.rmtree(initial_data_dir)
