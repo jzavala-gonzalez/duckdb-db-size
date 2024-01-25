@@ -26,7 +26,8 @@ for filepath in filepaths:
     filesize_data.append((filepath, filesize))
 
 # Save filesize data to a DuckDB database
-con = duckdb.connect(':memory:')
+os.makedirs('databases', exist_ok=True)
+con = duckdb.connect('databases/files.db')
 con.execute('CREATE TABLE file_sizes (filepath VARCHAR, filesize INT)')
 con.executemany('INSERT INTO file_sizes VALUES (?, ?)', filesize_data)
 

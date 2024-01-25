@@ -1,5 +1,6 @@
 env/*
 regions_without_service/*
+databases/*
 
 .DS_Store
 __MACOSX/*
