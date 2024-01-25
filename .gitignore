@@ -1,0 +1,6 @@
+env/*
+regions_without_service/*
+
+.DS_Store
+__MACOSX/*
+__pycache__/*
