@@ -1,10 +1,11 @@
 import os
 import duckdb
+import polars as pl
 import shutil
 
 from constants import data_dir
 
-num_starting_files_options = [1, ] # how many files ingested at creation time
+num_starting_files_options = [500, 1000] # how many files ingested at creation time
                                    # must be at least 1
 batch_size = 2000 # how many files to ingest at a time, usually 1 or 2
 
@@ -25,7 +26,9 @@ con_files.close()
 initial_data_dir = f'initial_{data_dir}'
 incremental_data_dir = f'incremental_{data_dir}'
 tmp_db_path = 'databases/tmp.db'
-for num_starting_files in num_starting_files_options:
+sizes_db_path = 'databases/sizes.db'
+all_db_sizes_df = None
+for (idx_starting_files, num_starting_files) in enumerate(num_starting_files_options, start=0):
 
     # Create initial dataset
     if os.path.exists(initial_data_dir):
@@ -80,7 +83,24 @@ for num_starting_files in num_starting_files_options:
     con = duckdb.connect(tmp_db_path)
     print('Initial database size:')
     print(f'Total rows: {con.sql("select count(*) from regions_without_service_staging").fetchone()[0]:,}')
-    print(con.sql('call pragma_database_size();'))
+    pragma_db_size = con.sql('call pragma_database_size();')
+    print(pragma_db_size)
+    pragma_db_size_df = pragma_db_size.pl()
+    pragma_db_size_df = (
+        pragma_db_size_df
+        .select([
+            pl.lit(num_starting_files).alias('num_starting_files'),
+            pl.lit(0).alias('num_batches_added'),
+            pl.lit(batch_size).alias('batch_size'),
+            pl.lit(con.sql("select count(*) from regions_without_service_staging").fetchone()[0]).alias('num_files'),
+            *pragma_db_size_df.columns,
+        ])
+    )
+    print(pragma_db_size_df)
+    if all_db_sizes_df is None:
+        all_db_sizes_df = pragma_db_size_df
+    else:
+        all_db_sizes_df = all_db_sizes_df.vstack(pragma_db_size_df)
     con.close()
 
     ### Batch incremental datasets
@@ -161,12 +181,42 @@ for num_starting_files in num_starting_files_options:
         # Measure new database size
         con = duckdb.connect(tmp_db_path)
         print(f'Total rows: {con.sql("select count(*) from regions_without_service_staging").fetchone()[0]:,}')
-        print(con.sql('call pragma_database_size();'))
+        pragma_db_size = con.sql('call pragma_database_size();')
+        print(pragma_db_size)
+        pragma_db_size_df = pragma_db_size.pl()
+        pragma_db_size_df = (
+            pragma_db_size_df
+            .select([
+                pl.lit(num_starting_files).alias('num_starting_files'),
+                pl.lit(batch_num).alias('num_batches_added'),
+                pl.lit(batch_size).alias('batch_size'),
+                pl.lit(con.sql("select count(*) from regions_without_service_staging").fetchone()[0]).alias('num_files'),
+                *pragma_db_size_df.columns,
+            ])
+        )
+        all_db_sizes_df = all_db_sizes_df.vstack(pragma_db_size_df)
         con.close()
 
         print()
     
     # con.close()
 
-shutil.rmtree(incremental_data_dir)
-shutil.rmtree(initial_data_dir)
+# print(all_db_sizes_df)
+
+# Save database size data to a DuckDB database
+con_sizes = duckdb.connect(sizes_db_path)
+con_sizes.execute(
+'''
+create or replace table db_sizes as (
+    select *
+    from all_db_sizes_df
+)
+'''
+)
+print(con_sizes.sql('select * from db_sizes'))
+con_sizes.close()
+
+if os.path.exists(incremental_data_dir):
+    shutil.rmtree(incremental_data_dir)
+if os.path.exists(initial_data_dir):
+    shutil.rmtree(initial_data_dir)
