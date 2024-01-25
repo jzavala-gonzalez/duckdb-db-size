@@ -5,7 +5,8 @@ import shutil
 
 from constants import data_dir
 
-num_starting_files_options = [500, 1000] # how many files ingested at creation time
+num_starting_files_options = [1000, 3000, 5000, 7000, 9000,
+                              ] # how many files ingested at creation time
                                    # must be at least 1
 batch_size = 2000 # how many files to ingest at a time, usually 1 or 2
 
