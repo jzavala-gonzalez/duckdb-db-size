@@ -1,6 +1,6 @@
 env/*
 regions_without_service/*
-databases/*
+databases/tmp.db
 initial_regions_without_service/*
 incremental_regions_without_service/*
 

@@ -15,6 +15,9 @@ DuckDB is great at compressing a large number of files when importing them all a
 
 This code uses the dataset sample to simulate datasets being inserted into DuckDB databases through different ingestions. Parameters include the initial ingestion sizes (`num_starting_files_options`) and batch size. Database size post-ingestion is read from DuckDB's pragma after restarting the connection.
 
+## Accessing data
+
+Results are saved in two DuckDB files in the `databases/` folder. Use CLI or preferred tool to access them.
 
 ## Running the code
 
